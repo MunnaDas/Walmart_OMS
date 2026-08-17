@@ -3,6 +3,13 @@ from sqlalchemy import String, Integer, Float, DateTime, ForeignKey, UniqueConst
 from sqlalchemy.orm import Mapped, mapped_column
 from .database import Base
 
+class User(Base):
+    __tablename__ = "users"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    email: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    role: Mapped[str] = mapped_column(String(40), default="CUSTOMER")
+
 class Product(Base):
     __tablename__ = "products"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -76,6 +83,15 @@ class ReturnOrder(Base):
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
     reason: Mapped[str] = mapped_column(String(250))
     status: Mapped[str] = mapped_column(String(40), default="REQUESTED")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    event_type: Mapped[str] = mapped_column(String(80))
+    message: Mapped[str] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(String(30), default="PENDING")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 class AuditLog(Base):
