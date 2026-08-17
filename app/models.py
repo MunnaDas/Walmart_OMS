@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import String, Integer, Float, DateTime, ForeignKey, UniqueConstraint, Index
+from sqlalchemy import String, Integer, Float, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from .database import Base
 
@@ -9,6 +9,7 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(120))
     email: Mapped[str] = mapped_column(String(200), unique=True, index=True)
     role: Mapped[str] = mapped_column(String(40), default="CUSTOMER")
+    password_hash: Mapped[str] = mapped_column(String(255), default="")
 
 class Product(Base):
     __tablename__ = "products"
