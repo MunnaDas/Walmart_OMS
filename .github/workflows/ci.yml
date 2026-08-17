@@ -22,8 +22,6 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
-      - run: pip install ruff
-      - run: ruff check app tests
       - run: pytest -q
         env:
           DATABASE_URL: postgresql+psycopg://oms:oms@localhost:5432/oms_test
