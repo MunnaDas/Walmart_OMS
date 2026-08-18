@@ -7,4 +7,5 @@
 - Picking and packing are warehouse operations represented by explicit fulfillment states.
 - Carrier integration is mocked; shipment records expose an adapter-friendly boundary for real carriers.
 - Notifications and analytics are downstream concerns and can consume domain events asynchronously.
-- Authentication/RBAC, Kafka and Kubernetes are extension points for the case-study discussion and production hardening.
+- Authentication and RBAC are implemented using JWT bearer authentication and role-based authorization.
+- Kafka and Kubernetes are future production-scaling options discussed in the architecture and design documentation; they are intentionally not required for the current modular-monolith implementation.
