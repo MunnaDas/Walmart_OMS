@@ -1,11 +1,7 @@
 from fastapi.testclient import TestClient
 
-from app.database import Base, engine
 from app.main import app
 
-# Tests own schema lifecycle; application startup must never create/alter production schema.
-Base.metadata.drop_all(bind=engine)
-Base.metadata.create_all(bind=engine)
 client = TestClient(app)
 
 
