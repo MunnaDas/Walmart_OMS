@@ -1,35 +1,29 @@
-from datetime import datetime
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+
+from app.core.security import require_roles
 from app.database import get_db
-from app.models import Fulfillment, Order, Package
-from pydantic import BaseModel
+from app.models import Fulfillment, User
+from app.services.fulfillment_service import FulfillmentService
 
 router = APIRouter(prefix="/fulfillment", tags=["Fulfillment"])
+
 
 class PickIn(BaseModel):
     picker_id: str
 
+
 class PackIn(BaseModel):
-    weight: float = 0
+    weight: Decimal = Field(default=Decimal("0.00"), ge=0)
     dimensions: str = "UNKNOWN"
 
-TRANSITIONS = {
-    "ALLOCATED": "PICKING",
-    "PICKING": "PICKED",
-    "PICKED": "PACKING",
-    "PACKING": "PACKED",
-    "PACKED": "READY_TO_SHIP",
-}
-ORDER_STATUS = {
-    "PICKING": "PICKING", "PICKED": "PICKED", "PACKING": "PACKING",
-    "PACKED": "PACKED", "READY_TO_SHIP": "READY_TO_SHIP"
-}
 
-def advance(f, target):
-    if TRANSITIONS.get(f.status) != target:
-        raise HTTPException(409, f"Cannot transition {f.status} -> {target}")
-    f.status = target
+def get_service(db: Session) -> FulfillmentService:
+    return FulfillmentService(db)
+
 
 @router.get("/{fulfillment_id}")
 def get_fulfillment(fulfillment_id: int, db: Session = Depends(get_db)):
@@ -38,44 +32,67 @@ def get_fulfillment(fulfillment_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, "Fulfillment not found")
     return f
 
+
 @router.post("/{fulfillment_id}/start-picking")
-def start_picking(fulfillment_id: int, data: PickIn, db: Session = Depends(get_db)):
-    f = db.get(Fulfillment, fulfillment_id)
+def start_picking(fulfillment_id: int, data: PickIn, db: Session = Depends(get_db), _: User = Depends(require_roles("ADMIN", "WAREHOUSE_OPERATOR"))):
+    service = get_service(db)
+    f = service.get(fulfillment_id)
     if not f:
         raise HTTPException(404, "Fulfillment not found")
-    advance(f, "PICKING")
-    f.picker_id = data.picker_id
-    order = db.get(Order, f.order_id); order.status = "PICKING"
-    db.commit(); db.refresh(f); return f
+    try:
+        service.start_picking(f, data.picker_id)
+        db.commit()
+        db.refresh(f)
+        return f
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc))
+
 
 @router.post("/{fulfillment_id}/complete-picking")
-def complete_picking(fulfillment_id: int, db: Session = Depends(get_db)):
-    f = db.get(Fulfillment, fulfillment_id)
+def complete_picking(fulfillment_id: int, db: Session = Depends(get_db), _: User = Depends(require_roles("ADMIN", "WAREHOUSE_OPERATOR"))):
+    service = get_service(db)
+    f = service.get(fulfillment_id)
     if not f:
         raise HTTPException(404, "Fulfillment not found")
-    advance(f, "PICKED")
-    db.get(Order, f.order_id).status = "PICKED"
-    db.commit(); db.refresh(f); return f
+    try:
+        service.complete_picking(f)
+        db.commit()
+        db.refresh(f)
+        return f
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc))
+
 
 @router.post("/{fulfillment_id}/start-packing")
-def start_packing(fulfillment_id: int, db: Session = Depends(get_db)):
-    f = db.get(Fulfillment, fulfillment_id)
+def start_packing(fulfillment_id: int, db: Session = Depends(get_db), _: User = Depends(require_roles("ADMIN", "WAREHOUSE_OPERATOR"))):
+    service = get_service(db)
+    f = service.get(fulfillment_id)
     if not f:
         raise HTTPException(404, "Fulfillment not found")
-    advance(f, "PACKING")
-    db.get(Order, f.order_id).status = "PACKING"
-    db.commit(); db.refresh(f); return f
+    try:
+        service.start_packing(f)
+        db.commit()
+        db.refresh(f)
+        return f
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc))
+
 
 @router.post("/{fulfillment_id}/pack")
-def pack(fulfillment_id: int, data: PackIn, db: Session = Depends(get_db)):
-    f = db.get(Fulfillment, fulfillment_id)
+def pack(fulfillment_id: int, data: PackIn, db: Session = Depends(get_db), _: User = Depends(require_roles("ADMIN", "WAREHOUSE_OPERATOR"))):
+    service = get_service(db)
+    f = service.get(fulfillment_id)
     if not f:
         raise HTTPException(404, "Fulfillment not found")
-    advance(f, "PACKED")
-    order = db.get(Order, f.order_id)
-    package = Package(order_id=order.id, weight=data.weight, dimensions=data.dimensions, status="PACKED")
-    db.add(package)
-    f.packed_at = datetime.utcnow()
-    order.status = "PACKED"
-    db.commit(); db.refresh(package); db.refresh(f)
-    return {"fulfillment": f, "package": package}
+    try:
+        package = service.pack(f, data.weight, data.dimensions)
+        db.commit()
+        db.refresh(package)
+        db.refresh(f)
+        return {"fulfillment": f, "package": package}
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc))
