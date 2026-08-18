@@ -9,7 +9,6 @@ from .database import Base
 
 class User(Base):
     __tablename__ = "users"
-
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(120))
     email: Mapped[str] = mapped_column(String(200), unique=True, index=True)
@@ -19,7 +18,6 @@ class User(Base):
 
 class Product(Base):
     __tablename__ = "products"
-
     id: Mapped[int] = mapped_column(primary_key=True)
     sku: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(200))
@@ -29,7 +27,6 @@ class Product(Base):
 
 class Warehouse(Base):
     __tablename__ = "warehouses"
-
     id: Mapped[int] = mapped_column(primary_key=True)
     code: Mapped[str] = mapped_column(String(32), unique=True)
     name: Mapped[str] = mapped_column(String(120))
@@ -39,13 +36,12 @@ class Warehouse(Base):
     __table_args__ = (
         CheckConstraint("capacity >= 0", name="ck_warehouses_capacity_non_negative"),
         CheckConstraint("used_capacity >= 0", name="ck_warehouses_used_capacity_non_negative"),
-        CheckConstraint("used_capacity <= capacity", name="ck_warehouses_capacity_limit"),
+        CheckConstraint("capacity = 0 OR used_capacity <= capacity", name="ck_warehouses_capacity_limit"),
     )
 
 
 class WarehouseLocation(Base):
     __tablename__ = "warehouse_locations"
-
     id: Mapped[int] = mapped_column(primary_key=True)
     warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), index=True)
     zone: Mapped[str] = mapped_column(String(50), default="DEFAULT")
@@ -60,7 +56,6 @@ class WarehouseLocation(Base):
 
 class Inventory(Base):
     __tablename__ = "inventory"
-
     id: Mapped[int] = mapped_column(primary_key=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), index=True)
     warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), index=True)
@@ -78,16 +73,12 @@ class Inventory(Base):
         CheckConstraint("available_quantity >= 0", name="ck_inventory_available_non_negative"),
         CheckConstraint("reserved_quantity >= 0", name="ck_inventory_reserved_non_negative"),
         CheckConstraint("damaged_quantity >= 0", name="ck_inventory_damaged_non_negative"),
-        CheckConstraint(
-            "available_quantity + reserved_quantity + damaged_quantity <= on_hand_quantity",
-            name="ck_inventory_quantity_balance",
-        ),
+        CheckConstraint("available_quantity + reserved_quantity + damaged_quantity <= on_hand_quantity", name="ck_inventory_quantity_balance"),
     )
 
 
 class InventoryMovement(Base):
     __tablename__ = "inventory_movements"
-
     id: Mapped[int] = mapped_column(primary_key=True)
     inventory_id: Mapped[int] = mapped_column(ForeignKey("inventory.id"), index=True)
     movement_type: Mapped[str] = mapped_column(String(40))
@@ -95,14 +86,11 @@ class InventoryMovement(Base):
     reference_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
     reference_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    __table_args__ = (
-        CheckConstraint("quantity > 0", name="ck_inventory_movement_quantity_positive"),
-    )
+    __table_args__ = (CheckConstraint("quantity > 0", name="ck_inventory_movement_quantity_positive"),)
 
 
 class Order(Base):
     __tablename__ = "orders"
-
     id: Mapped[int] = mapped_column(primary_key=True)
     customer_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     status: Mapped[str] = mapped_column(String(40), default="CREATED", index=True)
@@ -111,28 +99,21 @@ class Order(Base):
     idempotency_request_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    __table_args__ = (
-        CheckConstraint("total_amount >= 0", name="ck_orders_total_non_negative"),
-    )
+    __table_args__ = (CheckConstraint("total_amount >= 0", name="ck_orders_total_non_negative"),)
 
 
 class OrderItem(Base):
     __tablename__ = "order_items"
-
     id: Mapped[int] = mapped_column(primary_key=True)
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"))
     quantity: Mapped[int] = mapped_column(Integer)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2))
-    __table_args__ = (
-        CheckConstraint("quantity > 0", name="ck_order_items_quantity_positive"),
-        CheckConstraint("unit_price >= 0", name="ck_order_items_unit_price_non_negative"),
-    )
+    __table_args__ = (CheckConstraint("quantity > 0", name="ck_order_items_quantity_positive"), CheckConstraint("unit_price >= 0", name="ck_order_items_unit_price_non_negative"))
 
 
 class Allocation(Base):
     __tablename__ = "allocations"
-
     id: Mapped[int] = mapped_column(primary_key=True)
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
     order_item_id: Mapped[int] = mapped_column(ForeignKey("order_items.id"))
@@ -144,7 +125,6 @@ class Allocation(Base):
 
 class Fulfillment(Base):
     __tablename__ = "fulfillments"
-
     id: Mapped[int] = mapped_column(primary_key=True)
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), unique=True)
     status: Mapped[str] = mapped_column(String(40), default="ALLOCATED")
@@ -154,7 +134,6 @@ class Fulfillment(Base):
 
 class Package(Base):
     __tablename__ = "packages"
-
     id: Mapped[int] = mapped_column(primary_key=True)
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
     warehouse_id: Mapped[int | None] = mapped_column(ForeignKey("warehouses.id"), nullable=True)
@@ -165,7 +144,6 @@ class Package(Base):
 
 class Shipment(Base):
     __tablename__ = "shipments"
-
     id: Mapped[int] = mapped_column(primary_key=True)
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
     package_id: Mapped[int | None] = mapped_column(ForeignKey("packages.id"), nullable=True)
@@ -178,7 +156,6 @@ class Shipment(Base):
 
 class ReturnOrder(Base):
     __tablename__ = "returns"
-
     id: Mapped[int] = mapped_column(primary_key=True)
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
     reason: Mapped[str] = mapped_column(String(250))
@@ -188,7 +165,6 @@ class ReturnOrder(Base):
 
 class ReturnItem(Base):
     __tablename__ = "return_items"
-
     id: Mapped[int] = mapped_column(primary_key=True)
     return_id: Mapped[int] = mapped_column(ForeignKey("returns.id"), index=True)
     order_item_id: Mapped[int] = mapped_column(ForeignKey("order_items.id"))
@@ -200,7 +176,6 @@ class ReturnItem(Base):
 
 class Notification(Base):
     __tablename__ = "notifications"
-
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     event_type: Mapped[str] = mapped_column(String(80))
@@ -211,7 +186,6 @@ class Notification(Base):
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
-
     id: Mapped[int] = mapped_column(primary_key=True)
     entity_type: Mapped[str] = mapped_column(String(50))
     entity_id: Mapped[str] = mapped_column(String(50))
