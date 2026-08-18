@@ -26,7 +26,7 @@ def get_service(db: Session) -> FulfillmentService:
 
 
 @router.get("/{fulfillment_id}")
-def get_fulfillment(fulfillment_id: int, db: Session = Depends(get_db)):
+def get_fulfillment(fulfillment_id: int, db: Session = Depends(get_db), _: User = Depends(require_roles("ADMIN", "WAREHOUSE_OPERATOR"))):
     f = db.get(Fulfillment, fulfillment_id)
     if not f:
         raise HTTPException(404, "Fulfillment not found")
@@ -46,7 +46,7 @@ def start_picking(fulfillment_id: int, data: PickIn, db: Session = Depends(get_d
         return f
     except ValueError as exc:
         db.rollback()
-        raise HTTPException(409, str(exc))
+        raise HTTPException(409, str(exc)) from exc
 
 
 @router.post("/{fulfillment_id}/complete-picking")
@@ -62,7 +62,7 @@ def complete_picking(fulfillment_id: int, db: Session = Depends(get_db), _: User
         return f
     except ValueError as exc:
         db.rollback()
-        raise HTTPException(409, str(exc))
+        raise HTTPException(409, str(exc)) from exc
 
 
 @router.post("/{fulfillment_id}/start-packing")
@@ -78,7 +78,7 @@ def start_packing(fulfillment_id: int, db: Session = Depends(get_db), _: User = 
         return f
     except ValueError as exc:
         db.rollback()
-        raise HTTPException(409, str(exc))
+        raise HTTPException(409, str(exc)) from exc
 
 
 @router.post("/{fulfillment_id}/pack")
@@ -95,4 +95,4 @@ def pack(fulfillment_id: int, data: PackIn, db: Session = Depends(get_db), _: Us
         return {"fulfillment": f, "package": package}
     except ValueError as exc:
         db.rollback()
-        raise HTTPException(409, str(exc))
+        raise HTTPException(409, str(exc)) from exc
