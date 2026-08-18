@@ -3,11 +3,16 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 client = TestClient(app)
+ADMIN_TOKEN: str | None = None
 
 
 def create_user(suffix: str, role: str = "CUSTOMER") -> tuple[int, str]:
     email = f"{role.lower()}-{suffix}@example.com"
     response = client.post("/api/v1/users", json={"name": f"{role} {suffix}", "email": email, "password": "password123", "role": role})
+    if role == "ADMIN" and response.status_code == 409:
+        login = client.post("/api/v1/auth/login", data={"username": email, "password": "password123"})
+        assert login.status_code == 200, login.text
+        return 0, login.json()["access_token"]
     assert response.status_code == 201, response.text
     user_id = response.json()["id"]
     login = client.post("/api/v1/auth/login", data={"username": email, "password": "password123"})
@@ -16,8 +21,11 @@ def create_user(suffix: str, role: str = "CUSTOMER") -> tuple[int, str]:
 
 
 def setup_admin() -> str:
-    _, token = create_user("admin", "ADMIN")
-    return token
+    global ADMIN_TOKEN
+    if ADMIN_TOKEN:
+        return ADMIN_TOKEN
+    _, ADMIN_TOKEN = create_user("admin", "ADMIN")
+    return ADMIN_TOKEN
 
 
 def test_order_reservation_and_idempotency():
