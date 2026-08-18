@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS warehouses (
     capacity INTEGER NOT NULL DEFAULT 0 CHECK (capacity >= 0),
     used_capacity INTEGER NOT NULL DEFAULT 0 CHECK (used_capacity >= 0),
     status VARCHAR(30) NOT NULL DEFAULT 'ACTIVE',
-    CHECK (used_capacity <= capacity)
+    CHECK (capacity = 0 OR used_capacity <= capacity)
 );
 
 CREATE TABLE IF NOT EXISTS warehouse_locations (
