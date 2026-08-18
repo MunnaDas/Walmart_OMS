@@ -9,3 +9,5 @@ httpx==0.28.1
 email-validator==2.3.0
 PyJWT==2.10.1
 python-multipart==0.0.20
+ruff==0.12.8
+coverage==7.10.2
