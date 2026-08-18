@@ -1,7 +1,7 @@
 name: CI
 on: [push, pull_request]
 jobs:
-  test:
+  quality:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -22,9 +22,11 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
+      - run: ruff check app tests
       - run: alembic upgrade head
         env:
           DATABASE_URL: postgresql+psycopg://oms:oms@localhost:5432/oms_test
-      - run: python -m pytest -q
+      - run: coverage run -m pytest
         env:
           DATABASE_URL: postgresql+psycopg://oms:oms@localhost:5432/oms_test
+      - run: coverage report --fail-under=80
