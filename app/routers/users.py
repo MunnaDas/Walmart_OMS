@@ -17,12 +17,13 @@ class UserIn(BaseModel):
 
 
 @router.post("", status_code=201)
-def create_user(data: UserIn, db: Session = Depends(get_db), current_user: User | None = Depends(lambda: None)):
+def create_user(data: UserIn, db: Session = Depends(get_db)):
     if len(data.password) < 8:
         raise HTTPException(400, "Password must contain at least 8 characters")
     if data.role not in {"CUSTOMER", "WAREHOUSE_OPERATOR", "ADMIN"}:
         raise HTTPException(400, "Invalid user role")
-    if db.query(User).count() and data.role != "CUSTOMER":
+    existing_users = db.query(User).count()
+    if existing_users and data.role != "CUSTOMER":
         raise HTTPException(403, "Only an administrator can create privileged users")
     if db.query(User).filter_by(email=data.email).first():
         raise HTTPException(409, "Email already registered")
