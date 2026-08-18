@@ -1,22 +1,27 @@
 from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+
 from app.database import get_db
-from app.models import ReturnOrder, ReturnItem, Order, OrderItem, Inventory
+from app.models import Allocation, Inventory, InventoryMovement, Order, OrderItem, ReturnItem, ReturnOrder
 
 router = APIRouter(prefix="/returns", tags=["Returns"])
 
+
 class ReturnItemIn(BaseModel):
     order_item_id: int
-    quantity: int
+    quantity: int = Field(gt=0)
     condition: str = "GOOD"
     restockable: bool = True
+
 
 class ReturnIn(BaseModel):
     order_id: int
     reason: str
     items: list[ReturnItemIn]
+
 
 @router.post("", status_code=201)
 def create_return(data: ReturnIn, db: Session = Depends(get_db)):
@@ -25,45 +30,132 @@ def create_return(data: ReturnIn, db: Session = Depends(get_db)):
         raise HTTPException(409, "Only delivered orders can be returned")
     if not data.items:
         raise HTTPException(400, "At least one return item is required")
-    r = ReturnOrder(order_id=order.id, reason=data.reason, status="REQUESTED")
-    db.add(r); db.flush()
-    for item in data.items:
-        oi = db.get(OrderItem, item.order_item_id)
-        if not oi or oi.order_id != order.id or item.quantity <= 0 or item.quantity > oi.quantity:
-            db.rollback(); raise HTTPException(400, "Invalid return item or quantity")
-        db.add(ReturnItem(return_id=r.id, order_item_id=oi.id, quantity=item.quantity, condition=item.condition, restockable=item.restockable))
-    db.commit(); db.refresh(r); return r
+
+    try:
+        return_order = ReturnOrder(order_id=order.id, reason=data.reason, status="REQUESTED")
+        db.add(return_order)
+        db.flush()
+
+        requested_by_item: dict[int, int] = {}
+        for item in data.items:
+            requested_by_item[item.order_item_id] = requested_by_item.get(item.order_item_id, 0) + item.quantity
+
+        for order_item_id, requested_quantity in requested_by_item.items():
+            order_item = db.get(OrderItem, order_item_id)
+            if not order_item or order_item.order_id != order.id:
+                raise HTTPException(400, "Invalid return item")
+
+            already_returned = (
+                db.query(ReturnItem)
+                .join(ReturnOrder, ReturnOrder.id == ReturnItem.return_id)
+                .filter(
+                    ReturnOrder.order_id == order.id,
+                    ReturnItem.order_item_id == order_item_id,
+                    ReturnOrder.status != "CANCELLED",
+                )
+                .with_for_update()
+                .all()
+            )
+            returned_quantity = sum(item.quantity for item in already_returned)
+            if requested_quantity > order_item.quantity - returned_quantity:
+                raise HTTPException(
+                    409,
+                    f"Return quantity exceeds remaining returnable quantity for order item {order_item_id}",
+                )
+
+        for item in data.items:
+            db.add(
+                ReturnItem(
+                    return_id=return_order.id,
+                    order_item_id=item.order_item_id,
+                    quantity=item.quantity,
+                    condition=item.condition,
+                    restockable=item.restockable,
+                )
+            )
+        db.commit()
+        db.refresh(return_order)
+        return return_order
+    except HTTPException:
+        db.rollback()
+        raise
+
 
 @router.get("/{return_id}")
 def get_return(return_id: int, db: Session = Depends(get_db)):
-    r = db.get(ReturnOrder, return_id)
-    if not r:
+    return_order = db.get(ReturnOrder, return_id)
+    if not return_order:
         raise HTTPException(404, "Return not found")
     items = db.query(ReturnItem).filter_by(return_id=return_id).all()
-    return {"return": r, "items": items}
+    return {"return": return_order, "items": items}
+
 
 @router.post("/{return_id}/receive")
 def receive_return(return_id: int, db: Session = Depends(get_db)):
-    r = db.get(ReturnOrder, return_id)
-    if not r or r.status != "REQUESTED":
+    return_order = db.get(ReturnOrder, return_id)
+    if not return_order or return_order.status != "REQUESTED":
         raise HTTPException(409, "Return must be in REQUESTED state")
-    for item in db.query(ReturnItem).filter_by(return_id=return_id).all():
-        if not item.restockable:
-            continue
-        oi = db.get(OrderItem, item.order_item_id)
-        inv = db.query(Inventory).filter_by(product_id=oi.product_id).order_by(Inventory.available_quantity.desc()).first()
-        if not inv:
-            raise HTTPException(409, "No inventory location available for returned item")
-        inv.on_hand_quantity += item.quantity
-        inv.available_quantity += item.quantity
-        inv.last_movement_at = datetime.utcnow()
-    r.status = "RECEIVED"
-    db.commit(); db.refresh(r); return r
+
+    try:
+        for item in db.query(ReturnItem).filter_by(return_id=return_id).all():
+            if not item.restockable:
+                continue
+
+            order_item = db.get(OrderItem, item.order_item_id)
+            allocations = (
+                db.query(Allocation)
+                .filter_by(order_item_id=order_item.id)
+                .order_by(Allocation.id)
+                .all()
+            )
+            remaining = item.quantity
+
+            for allocation in allocations:
+                if remaining <= 0:
+                    break
+                query = db.query(Inventory).filter_by(
+                    product_id=order_item.product_id,
+                    warehouse_id=allocation.warehouse_id,
+                )
+                if db.bind.dialect.name == "postgresql":
+                    query = query.with_for_update()
+                inventory = query.first()
+                if not inventory:
+                    continue
+
+                take = min(remaining, allocation.quantity)
+                inventory.on_hand_quantity += take
+                inventory.available_quantity += take
+                inventory.last_movement_at = datetime.utcnow()
+                db.add(
+                    InventoryMovement(
+                        inventory_id=inventory.id,
+                        movement_type="RETURN",
+                        quantity=take,
+                        reference_type="RETURN",
+                        reference_id=str(return_order.id),
+                    )
+                )
+                remaining -= take
+
+            if remaining:
+                raise HTTPException(409, "No matching fulfillment inventory location available for returned item")
+
+        return_order.status = "RECEIVED"
+        db.commit()
+        db.refresh(return_order)
+        return return_order
+    except HTTPException:
+        db.rollback()
+        raise
+
 
 @router.post("/{return_id}/refund")
 def refund_return(return_id: int, db: Session = Depends(get_db)):
-    r = db.get(ReturnOrder, return_id)
-    if not r or r.status != "RECEIVED":
+    return_order = db.get(ReturnOrder, return_id)
+    if not return_order or return_order.status != "RECEIVED":
         raise HTTPException(409, "Return must be received before refund")
-    r.status = "REFUNDED"
-    db.commit(); db.refresh(r); return r
+    return_order.status = "REFUNDED"
+    db.commit()
+    db.refresh(return_order)
+    return return_order
