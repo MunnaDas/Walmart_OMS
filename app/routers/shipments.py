@@ -32,7 +32,7 @@ def create_shipment(order_id: int, carrier: str = "MOCK_CARRIER", db: Session = 
 
 
 @router.get("/{shipment_id}")
-def get_shipment(shipment_id: int, db: Session = Depends(get_db)):
+def get_shipment(shipment_id: int, db: Session = Depends(get_db), _: User = Depends(require_roles("ADMIN", "WAREHOUSE_OPERATOR"))):
     s = db.get(Shipment, shipment_id)
     if not s:
         raise HTTPException(404, "Shipment not found")
