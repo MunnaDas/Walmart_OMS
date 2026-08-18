@@ -48,7 +48,7 @@ def test_order_reservation_and_idempotency():
     assert order.status_code == 201
     order_id = order.json()["id"]
     assert order.json()["status"] == "ALLOCATED"
-    assert order.json()["total_amount"] == "75.00"
+    assert order.json()["total_amount"] == 75.0
 
     duplicate = client.post(
         "/api/v1/orders",
@@ -76,8 +76,7 @@ def test_oversell_is_rejected():
     assert product.status_code == 201
     pid = product.json()["id"]
     warehouse = client.post(
-        "/api/v1/warehouses",
-        json={"code": "WH-OVERSELL", "name": "Oversell Warehouse", "capacity": 100},
+        "/api/v1/warehouses", json={"code": "WH-OVERSELL", "name": "Oversell Warehouse", "capacity": 100}
     )
     assert warehouse.status_code == 201
     wid = warehouse.json()["id"]
