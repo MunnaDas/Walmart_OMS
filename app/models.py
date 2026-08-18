@@ -1,44 +1,66 @@
 from datetime import datetime
-from sqlalchemy import String, Integer, Float, DateTime, ForeignKey, UniqueConstraint
+from decimal import Decimal
+
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
+
 from .database import Base
+
 
 class User(Base):
     __tablename__ = "users"
+
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(120))
     email: Mapped[str] = mapped_column(String(200), unique=True, index=True)
     role: Mapped[str] = mapped_column(String(40), default="CUSTOMER")
     password_hash: Mapped[str] = mapped_column(String(255), default="")
 
+
 class Product(Base):
     __tablename__ = "products"
+
     id: Mapped[int] = mapped_column(primary_key=True)
     sku: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(200))
-    price: Mapped[float] = mapped_column(Float)
+    price: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
+    __table_args__ = (CheckConstraint("price >= 0", name="ck_products_price_non_negative"),)
+
 
 class Warehouse(Base):
     __tablename__ = "warehouses"
+
     id: Mapped[int] = mapped_column(primary_key=True)
     code: Mapped[str] = mapped_column(String(32), unique=True)
     name: Mapped[str] = mapped_column(String(120))
     capacity: Mapped[int] = mapped_column(Integer, default=0)
     used_capacity: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(30), default="ACTIVE")
+    __table_args__ = (
+        CheckConstraint("capacity >= 0", name="ck_warehouses_capacity_non_negative"),
+        CheckConstraint("used_capacity >= 0", name="ck_warehouses_used_capacity_non_negative"),
+        CheckConstraint("used_capacity <= capacity", name="ck_warehouses_capacity_limit"),
+    )
+
 
 class WarehouseLocation(Base):
     __tablename__ = "warehouse_locations"
+
     id: Mapped[int] = mapped_column(primary_key=True)
     warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), index=True)
     zone: Mapped[str] = mapped_column(String(50), default="DEFAULT")
     aisle: Mapped[str] = mapped_column(String(50), default="A")
     bin_code: Mapped[str] = mapped_column(String(64))
     capacity: Mapped[int] = mapped_column(Integer, default=0)
-    __table_args__ = (UniqueConstraint("warehouse_id", "bin_code", name="uq_warehouse_bin"),)
+    __table_args__ = (
+        UniqueConstraint("warehouse_id", "bin_code", name="uq_warehouse_bin"),
+        CheckConstraint("capacity >= 0", name="ck_locations_capacity_non_negative"),
+    )
+
 
 class Inventory(Base):
     __tablename__ = "inventory"
+
     id: Mapped[int] = mapped_column(primary_key=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), index=True)
     warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), index=True)
@@ -50,10 +72,22 @@ class Inventory(Base):
     reorder_level: Mapped[int] = mapped_column(Integer, default=0)
     received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     last_movement_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    __table_args__ = (UniqueConstraint("product_id", "warehouse_id", name="uq_inventory_product_warehouse"),)
+    __table_args__ = (
+        UniqueConstraint("product_id", "warehouse_id", name="uq_inventory_product_warehouse"),
+        CheckConstraint("on_hand_quantity >= 0", name="ck_inventory_on_hand_non_negative"),
+        CheckConstraint("available_quantity >= 0", name="ck_inventory_available_non_negative"),
+        CheckConstraint("reserved_quantity >= 0", name="ck_inventory_reserved_non_negative"),
+        CheckConstraint("damaged_quantity >= 0", name="ck_inventory_damaged_non_negative"),
+        CheckConstraint(
+            "available_quantity + reserved_quantity + damaged_quantity <= on_hand_quantity",
+            name="ck_inventory_quantity_balance",
+        ),
+    )
+
 
 class InventoryMovement(Base):
     __tablename__ = "inventory_movements"
+
     id: Mapped[int] = mapped_column(primary_key=True)
     inventory_id: Mapped[int] = mapped_column(ForeignKey("inventory.id"), index=True)
     movement_type: Mapped[str] = mapped_column(String(40))
@@ -61,53 +95,77 @@ class InventoryMovement(Base):
     reference_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
     reference_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_inventory_movement_quantity_positive"),
+    )
+
 
 class Order(Base):
     __tablename__ = "orders"
+
     id: Mapped[int] = mapped_column(primary_key=True)
-    customer_id: Mapped[str] = mapped_column(String(100))
+    customer_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     status: Mapped[str] = mapped_column(String(40), default="CREATED", index=True)
-    total_amount: Mapped[float] = mapped_column(Float, default=0)
-    idempotency_key: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True, index=True)
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
+    idempotency_key: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True, index=True)
+    idempotency_request_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    __table_args__ = (
+        CheckConstraint("total_amount >= 0", name="ck_orders_total_non_negative"),
+    )
+
 
 class OrderItem(Base):
     __tablename__ = "order_items"
+
     id: Mapped[int] = mapped_column(primary_key=True)
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"))
     quantity: Mapped[int] = mapped_column(Integer)
-    unit_price: Mapped[float] = mapped_column(Float)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_order_items_quantity_positive"),
+        CheckConstraint("unit_price >= 0", name="ck_order_items_unit_price_non_negative"),
+    )
+
 
 class Allocation(Base):
     __tablename__ = "allocations"
+
     id: Mapped[int] = mapped_column(primary_key=True)
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
     order_item_id: Mapped[int] = mapped_column(ForeignKey("order_items.id"))
     warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"))
     quantity: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(30), default="ALLOCATED")
+    __table_args__ = (CheckConstraint("quantity > 0", name="ck_allocations_quantity_positive"),)
+
 
 class Fulfillment(Base):
     __tablename__ = "fulfillments"
+
     id: Mapped[int] = mapped_column(primary_key=True)
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), unique=True)
     status: Mapped[str] = mapped_column(String(40), default="ALLOCATED")
     picker_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     packed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+
 class Package(Base):
     __tablename__ = "packages"
+
     id: Mapped[int] = mapped_column(primary_key=True)
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
     warehouse_id: Mapped[int | None] = mapped_column(ForeignKey("warehouses.id"), nullable=True)
-    weight: Mapped[float] = mapped_column(Float, default=0)
+    weight: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     dimensions: Mapped[str] = mapped_column(String(100), default="UNKNOWN")
     status: Mapped[str] = mapped_column(String(30), default="PACKED")
 
+
 class Shipment(Base):
     __tablename__ = "shipments"
+
     id: Mapped[int] = mapped_column(primary_key=True)
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
     package_id: Mapped[int | None] = mapped_column(ForeignKey("packages.id"), nullable=True)
@@ -117,25 +175,32 @@ class Shipment(Base):
     shipped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+
 class ReturnOrder(Base):
     __tablename__ = "returns"
+
     id: Mapped[int] = mapped_column(primary_key=True)
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
     reason: Mapped[str] = mapped_column(String(250))
     status: Mapped[str] = mapped_column(String(40), default="REQUESTED")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+
 class ReturnItem(Base):
     __tablename__ = "return_items"
+
     id: Mapped[int] = mapped_column(primary_key=True)
     return_id: Mapped[int] = mapped_column(ForeignKey("returns.id"), index=True)
     order_item_id: Mapped[int] = mapped_column(ForeignKey("order_items.id"))
     quantity: Mapped[int] = mapped_column(Integer)
     condition: Mapped[str] = mapped_column(String(30), default="GOOD")
     restockable: Mapped[bool] = mapped_column(default=True)
+    __table_args__ = (CheckConstraint("quantity > 0", name="ck_return_items_quantity_positive"),)
+
 
 class Notification(Base):
     __tablename__ = "notifications"
+
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     event_type: Mapped[str] = mapped_column(String(80))
@@ -143,8 +208,10 @@ class Notification(Base):
     status: Mapped[str] = mapped_column(String(30), default="PENDING")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
+
     id: Mapped[int] = mapped_column(primary_key=True)
     entity_type: Mapped[str] = mapped_column(String(50))
     entity_id: Mapped[str] = mapped_column(String(50))
